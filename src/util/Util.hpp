@@ -14,6 +14,7 @@
 #include <vector>
 #include <limits>
 #include <ctime>
+#include <functional>
 
 namespace fs = std::filesystem;
 using namespace std::chrono;
