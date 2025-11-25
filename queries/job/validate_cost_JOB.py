@@ -11,6 +11,12 @@ SAMPLE_SIZE = 100
 # Setup de diretório
 debug_dir = "../job_join_trees"
 
+if not os.path.exists(debug_dir):
+    try:
+        os.makedirs(debug_dir)
+        print(f"[Setup] Pasta '{debug_dir}' criada.")
+    except: pass
+
 # Carregamento de dados
 def load_ground_truth(filename):
     lookup = {}
@@ -18,12 +24,15 @@ def load_ground_truth(filename):
     try:
         with open(filename, 'r') as f:
             lines = f.readlines()
+        # extrai o nome das tabelas e cria um mapa de bits para cada uma
         names = lines[1].strip().split()
         name_to_mask = {name: (1 << i) for i, name in enumerate(names)}
+        # extrai as cardinalidades de cada join
         for line in lines[3:]:
             parts = line.strip().split()
             if len(parts) >= 2:
                 try:
+                    # salva a cardinalidade no lookup
                     lookup[int(parts[0])] = int(parts[1])
                 except ValueError: continue
     except Exception:
@@ -33,12 +42,15 @@ def load_ground_truth(filename):
 # Cálculo de custos
 def calculate_costs(tree_str, name_to_mask, lookup):
     clean_str = tree_str.strip()
+
+    # CASO BASE: folha
     if '|' not in clean_str:
         name = clean_str.replace('(', '').replace(')', '').strip()
         mask = name_to_mask.get(name, 0)
         card = lookup.get(mask, 1000)
         return card, 0, mask
 
+    # lógica pra achar o split principal
     balance = 0
     split_idx = -1
     inner = clean_str[1:-1]
@@ -51,39 +63,25 @@ def calculate_costs(tree_str, name_to_mask, lookup):
     
     if split_idx == -1: return 1000, 0, 0
 
+    # separa as strings esquerda e direita
     left = inner[:split_idx].strip()
     right = inner[split_idx+1:].strip()
     
+    # RECURSÃO
+    # calcula o custo das subárvores
     c_L, h_L, m_L = calculate_costs(left, name_to_mask, lookup)
     c_R, h_R, m_R = calculate_costs(right, name_to_mask, lookup)
     
+    # calcula o custo da junção atual
     curr_mask = m_L | m_R
+    # pega o tamanho real do join no lookup
     curr_card = lookup.get(curr_mask, (c_L * c_R) * 0.01)
+    # formula do hash join
     curr_hash_cost = (1.2 * min(c_L, c_R)) + max(c_L, c_R)
+    # calcula o custo total de hash
     total_hash = h_L + h_R + curr_hash_cost
     
     return curr_card, total_hash, curr_mask
-
-# Função de busca de arquivo robusta
-def find_and_read_tree(filename_in_log):
-    fname = os.path.basename(filename_in_log)
-    
-    # Lista de lugares onde ele pode estar
-    candidates = [
-        os.path.join(debug_dir, fname),           # Onde configuramos
-        os.path.join("../job_join_trees", fname), # Vizinho
-        os.path.join("../../job_join_trees", fname), # Raiz
-        filename_in_log                           # Caminho original do log
-    ]
-    
-    for path in candidates:
-        if os.path.exists(path):
-            try:
-                with open(path, 'r') as f:
-                    return f.read().strip()
-            except: continue
-            
-    return None
 
 # Motor de benchmark
 def run_benchmark():
@@ -130,14 +128,20 @@ def run_benchmark():
         for line in output.split('\n'):
             if "Debug filename:" in line:
                 path_in_log = line.split("Debug filename:")[1].strip()
-                
-                # Tenta achar o arquivo em qualquer lugar
-                content = find_and_read_tree(path_in_log)
-                
-                if content:
-                    if "cout" in path_in_log: tree_cout = content
-                    elif "dpccp" in path_in_log: tree_dpccp = content
-                    elif "cmax" in path_in_log and tree_dpccp is None: tree_dpccp = content
+
+                fname = os.path.basename(path_in_log)
+
+                full_path = os.path.join(debug_dir, fname)
+
+                if os.path.exists(full_path):
+                    with open(full_path, 'r') as f:
+                        content = f.read().strip()
+                    
+                    # Define quem é quem
+                    if "cout" in fname: 
+                        tree_cout = content
+                    elif "dpccp" in fname or "cmax" in fname: 
+                        tree_dpccp = content
 
         if not tree_cout or not tree_dpccp:
             print("FALHA (Arquivos de árvore não encontrados)")
